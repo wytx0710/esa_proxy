@@ -89,6 +89,55 @@ export default {
     }
 
     // ==========================================
+    // 1.5 边缘缓存（阿里云 ESA Cache API）
+    // 说明：ESA 边缘函数默认每次请求都会回源，这里用内置 cache 对象
+    //       把上游响应缓存到 ESA 边缘节点，重复请求直接命中，不再回源。
+    // 注意：
+    //   - ESA Cache API 的 key 必须是 HTTP 协议 URL（HTTPS 暂不支持），故强制用 http://
+    //   - TTL 由写入 Response 的 Cache-Control: max-age/s-maxage 决定
+    //   - 缓存仅对「当前边缘节点」生效
+    // ==========================================
+    const CACHE_TTL = 86400;                   // 缓存有效期（秒），可调整（如 604800 = 7 天）
+    const MAX_CACHE_BYTES = 50 * 1024 * 1024;  // 超过 50MB 不进缓存，避免内存/超时风险
+    const cacheKey = 'http://' + targetUrl.host + targetUrl.pathname + targetUrl.search;
+
+    // 先查边缘缓存
+    try {
+      const cached = await cache.get(cacheKey);
+      if (cached) {
+        cached.headers.set('Access-Control-Allow-Origin', '*');
+        cached.headers.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS, POST');
+        cached.headers.set('Access-Control-Allow-Headers', '*');
+        cached.headers.set('Access-Control-Expose-Headers',
+          'X-Debug-Fake-Referer, X-Debug-Upstream-IP, X-Debug-Upstream-UA, X-Debug-Proxy-Status, Content-Range, Content-Disposition, X-Cache');
+        cached.headers.delete('Set-Cookie');
+        // 处理客户端 Range：从缓存全量响应中切片返回 206
+        const clientRange = request.headers.get('range');
+        if (clientRange && cached.headers.has('content-length')) {
+          const total = parseInt(cached.headers.get('content-length') || '0', 10);
+          const rm = /bytes=(\d+)-(\d*)/.exec(clientRange);
+          if (rm && total > 0) {
+            let start = parseInt(rm[1], 10);
+            let end = rm[2] ? parseInt(rm[2], 10) : total - 1;
+            if (start <= end && end < total) {
+              const buf = await cached.arrayBuffer();
+              const slice = buf.slice(start, end + 1);
+              const headers = new Headers(cached.headers);
+              headers.set('Content-Range', `bytes ${start}-${end}/${total}`);
+              headers.set('Content-Length', String(end - start + 1));
+              headers.set('X-Cache', 'HIT');
+              return new Response(slice, { status: 206, statusText: 'Partial Content', headers });
+            }
+          }
+        }
+        cached.headers.set('X-Cache', 'HIT');
+        return cached;
+      }
+    } catch (_) {
+      // 缓存未命中或异常，继续回源
+    }
+
+    // ==========================================
     // 2. 禁止代理自身（防无限递归）
     // ==========================================
     if (targetUrl.hostname === url.hostname) {
@@ -290,11 +339,58 @@ export default {
         }
       }
 
-      // ==========================================
-      // 8. 包装并输出最终响应
-      // ==========================================
-      const responseHeaders = new Headers();
-      const headersToCopy = [
+    // ==========================================
+    // 8. 包装并输出最终响应
+    // ==========================================
+    const responseHeaders = new Headers();
+
+    // ── 边缘缓存写入 ──
+    // 仅在 GET 且上游返回 200、且非「用户强制伪装域名」模式时缓存，避免缓存污染。
+    if (request.method === 'GET' && response.status === 200 && !customRefererHost) {
+      const len = parseInt(response.headers.get('content-length') || '0', 10);
+      const cacheable = !len || len <= MAX_CACHE_BYTES;
+      const cacheClone = response.clone();   // 独立流，专用于写缓存
+      const clientRange = request.headers.get('range');
+
+      const doStore = async () => {
+        if (!cacheable) return;
+        try {
+          const c = new Response(cacheClone.body, {
+            status: cacheClone.status,
+            statusText: cacheClone.statusText,
+            headers: cacheClone.headers
+          });
+          c.headers.set('Cache-Control', `public, s-maxage=${CACHE_TTL}, max-age=${CACHE_TTL}`);
+          if (!c.headers.has('accept-ranges')) c.headers.set('accept-ranges', 'bytes');
+          await cache.put(cacheKey, c);
+        } catch (_) { /* 写入失败（超体积/不可缓存/并发控制）忽略 */ }
+      };
+
+      // 客户端带 Range：从全量响应切片成 206 返回，同时把全量写入缓存
+      if (clientRange && len > 0) {
+        const rm = /bytes=(\d+)-(\d*)/.exec(clientRange);
+        if (rm) {
+          let start = parseInt(rm[1], 10);
+          let end = rm[2] ? parseInt(rm[2], 10) : len - 1;
+          if (start <= end && end < len) {
+            const buf = await response.arrayBuffer();   // 消费原始流
+            await doStore();                            // 用 cacheClone 写缓存
+            const slice = buf.slice(start, end + 1);
+            const outHeaders = new Headers(responseHeaders);
+            outHeaders.set('Content-Range', `bytes ${start}-${end}/${len}`);
+            outHeaders.set('Content-Length', String(end - start + 1));
+            outHeaders.set('X-Cache', 'MISS');
+            return new Response(slice, { status: 206, statusText: 'Partial Content', headers: outHeaders });
+          }
+        }
+      }
+
+      // 普通 200（无有效 Range）：写缓存后原样返回
+      await doStore();
+      responseHeaders.set('X-Cache', 'MISS');
+    }
+
+    const headersToCopy = [
         'content-type', 'content-length', 'content-range',
         'accept-ranges', 'cache-control', 'expires',
         'last-modified', 'etag', 'content-disposition',
@@ -317,7 +413,7 @@ export default {
       responseHeaders.set('X-Debug-Upstream-UA', toValidHeaderValue(finalDebug.ua));
       responseHeaders.set('X-Debug-Proxy-Status', `${usedMode} -> Layer-1: ${response.status}`);
       responseHeaders.set('Access-Control-Expose-Headers',
-        'X-Debug-Fake-Referer, X-Debug-Upstream-IP, X-Debug-Upstream-UA, X-Debug-Proxy-Status, Content-Range, Content-Disposition');
+        'X-Debug-Fake-Referer, X-Debug-Upstream-IP, X-Debug-Upstream-UA, X-Debug-Proxy-Status, Content-Range, Content-Disposition, X-Cache');
 
       return new Response(response.body, {
         status: response.status,
