@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <title>反向代理网关 - CORS 跨域中转服务</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        :root {
+            --bg: #1a1a2e;
+            --card-bg: #16213e;
+            --border: #0f3460;
+            --text: #cdd6f4;
+            --text-secondary: #a6adc8;
+            --accent: #89b4fa;
+            --green: #a6e3a1;
+            --yellow: #f9e2af;
+            --red: #f38ba8;
+            --cyan: #89dceb;
+            --radius: 10px;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', sans-serif;
+            padding: 24px;
+            min-height: 100vh;
+            line-height: 1.6;
+        }
+
+        .container { max-width: 860px; margin: 0 auto; }
+
+        /* ── Header ── */
+        .header {
+            text-align: center; margin-bottom: 32px; padding: 36px 24px 28px;
+            background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius);
+        }
+        .header .icon { font-size: 48px; margin-bottom: 12px; }
+        .header h1 { font-size: 22px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+        .header .badge {
+            display: inline-block; margin-top: 8px; padding: 3px 14px; font-size: 12px; font-weight: 600;
+            color: var(--green); background: rgba(166,227,161,0.1);
+            border: 1px solid rgba(166,227,161,0.25); border-radius: 50px;
+            font-family: 'SF Mono','Fira Code','Courier New',monospace;
+        }
+
+        /* ── Card ── */
+        .card {
+            background: var(--card-bg); border: 1px solid var(--border);
+            border-radius: var(--radius); margin-bottom: 20px; overflow: hidden;
+        }
+        .card-header {
+            padding: 14px 22px; font-size: 14px; font-weight: 600;
+            background: rgba(137,180,250,0.06); border-bottom: 1px solid var(--border);
+            display: flex; align-items: center; gap: 8px;
+        }
+        .card-header .dot { width: 8px; height: 8px; border-radius: 50%; }
+        .card-body { padding: 20px 22px; }
+
+        /* ── Mode block ── */
+        .mode-block {
+            margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px dashed var(--border);
+        }
+        .mode-block:last-child { margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
+        .mode-label {
+            font-size: 13px; font-weight: 700; color: var(--accent);
+            margin-bottom: 6px; display: flex; align-items: center; gap: 6px;
+        }
+        .mode-label .icon { font-size: 16px; }
+        .mode-label .tag {
+            display: inline-block; font-size: 10px; padding: 1px 8px; border-radius: 4px;
+            font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px;
+        }
+        .tag-standard { background: rgba(137,180,250,0.15); color: var(--accent); }
+        .tag-disguise { background: rgba(249,226,175,0.15); color: var(--yellow); }
+
+        .mode-desc { font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; }
+
+        /* ── Input row: prefix + inputs + buttons ── */
+        .input-row {
+            display: flex; gap: 6px; align-items: stretch; margin-bottom: 6px;
+        }
+        .input-row .prefix {
+            flex-shrink: 0; display: flex; align-items: center; padding: 0 12px;
+            font-size: 12px; font-family: 'SF Mono','Fira Code','Courier New',monospace;
+            color: var(--text-secondary); background: var(--bg);
+            border: 1px solid var(--border); border-radius: 6px; white-space: nowrap;
+        }
+        .sep {
+            flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+            width: 20px; font-size: 18px; color: var(--text-secondary); font-family: monospace;
+        }
+
+        input[type="text"] {
+            padding: 10px 12px; font-size: 13px;
+            font-family: 'SF Mono','Fira Code','Courier New',monospace;
+            color: var(--text); background: var(--bg);
+            border: 1px solid var(--border); border-radius: 6px;
+            outline: none; transition: border-color 0.2s, box-shadow 0.2s;
+            min-width: 0;
+        }
+        input[type="text"]::placeholder { color: #4a5568; }
+        input[type="text"]:focus {
+            border-color: var(--accent); box-shadow: 0 0 0 3px rgba(137,180,250,0.12);
+        }
+        input[type="text"].valid { border-color: var(--green); }
+        input[type="text"].invalid { border-color: var(--red); }
+        .url-input { flex: 1; }
+        .domain-input { width: 170px; flex-shrink: 0; }
+
+        /* ── Inline action buttons ── */
+        .btn-inline {
+            flex-shrink: 0; padding: 0 14px; font-size: 12px; font-weight: 600;
+            border: none; border-radius: 6px; cursor: pointer; transition: all 0.15s;
+            display: flex; align-items: center; gap: 4px; white-space: nowrap;
+            font-family: -apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans SC',sans-serif;
+            height: auto;
+        }
+        .btn-inline:disabled { opacity: 0.3; cursor: not-allowed; }
+        .btn-visit { background: var(--accent); color: var(--bg); }
+        .btn-visit:hover:not(:disabled) { background: #a6c8ff; }
+        .btn-copy {
+            background: var(--border); color: var(--text-secondary);
+        }
+        .btn-copy:hover:not(:disabled) { background: var(--accent); color: var(--bg); }
+        .btn-copy.copied { background: var(--green); color: var(--bg); }
+
+        /* ── URL preview ── */
+        .url-preview {
+            display: none; align-items: flex-start; gap: 8px; font-size: 12px;
+            padding: 8px 12px; background: var(--bg); border: 1px solid var(--border);
+            border-radius: 6px; line-height: 1.5;
+        }
+        .url-preview.show { display: flex; }
+        .url-preview .label {
+            flex-shrink: 0; color: var(--text-secondary); font-size: 11px;
+            padding-top: 1px;
+        }
+        .url-preview .full-url {
+            font-family: 'SF Mono','Fira Code','Courier New',monospace;
+            color: var(--cyan); word-break: break-all; overflow-wrap: anywhere;
+        }
+        .input-hint {
+            font-size: 11px; color: var(--text-secondary); margin-top: 4px; padding-left: 2px;
+        }
+        .input-hint.error { color: var(--red); }
+        .input-hint.success { color: var(--green); }
+
+        /* ── Features list ── */
+        .feature-list {
+            list-style: none; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+        }
+        .feature-list li {
+            font-size: 13px; padding: 10px 12px; border-radius: 6px;
+            background: var(--bg); border: 1px solid var(--border);
+            display: flex; align-items: flex-start; gap: 8px; line-height: 1.4;
+        }
+        .feature-list li .check {
+            color: var(--green); font-weight: 700; font-size: 15px;
+            flex-shrink: 0; margin-top: 1px;
+        }
+
+        /* ── Tips ── */
+        .tip-list { list-style: none; }
+        .tip-list li {
+            font-size: 13px; padding: 6px 0; color: var(--text-secondary);
+            display: flex; align-items: flex-start; gap: 8px;
+        }
+        .tip-list li::before { content: '💡'; flex-shrink: 0; font-size: 13px; }
+
+        /* ── Footer ── */
+        .footer { text-align: center; padding: 10px; font-size: 11px; color: var(--text-secondary); opacity: 0.5; }
+
+        /* ── Responsive ── */
+        @media (max-width: 700px) {
+            body { padding: 12px; }
+            .header { padding: 24px 16px 20px; }
+            .header h1 { font-size: 18px; }
+            .card-body { padding: 16px; }
+            .card-header { padding: 12px 16px; }
+            .feature-list { grid-template-columns: 1fr; }
+            .input-row { flex-wrap: wrap; }
+            .input-row .prefix { width: 100%; justify-content: center; padding: 8px 12px; }
+            .domain-input { width: 100%; }
+            .url-input { flex: 1 1 100%; min-width: 100%; }
+            .sep { display: none; }
+            .btn-inline { flex: 1; justify-content: center; min-width: 0; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+
+        <!-- ═══════════ Header ═══════════ -->
+        <div class="header">
+            <div class="icon">🌐</div>
+            <h1>反向代理网关 - CORS 跨域中转服务</h1>
+            <div class="badge">STATUS: RUNNING</div>
+        </div>
+
+        <!-- ═══════════ 使用方法 ═══════════ -->
+        <div class="card">
+            <div class="card-header">
+                <span class="dot" style="background:var(--accent)"></span>
+                快速使用 / Quick Proxy
+            </div>
+            <div class="card-body">
+                <!-- 模式一：标准通用代理 -->
+                <div class="mode-block">
+                    <div class="mode-label">
+                        <span class="icon">🔗</span> 模式一：标准通用代理
+                        <span class="tag tag-standard">Standard</span>
+                    </div>
+                    <div class="mode-desc">
+                        模拟浏览器请求代理目标资源，绕过 CORS 跨域/防盗链限制。
+                    </div>
+                    <div class="input-row">
+                        <span class="prefix">https://<span id="host1"></span>/</span>
+                        <input type="text" class="url-input" id="url1"
+                            placeholder="例如: https://example.com/image.jpg"
+                            autocomplete="off" spellcheck="false">
+                        <button class="btn-inline btn-visit" id="visit1" disabled>🔗 访问</button>
+                        <button class="btn-inline btn-copy" id="copy1" disabled>📋 复制</button>
+                    </div>
+                    <div class="url-preview" id="preview1">
+                        <span class="label">代理地址：</span>
+                        <span class="full-url" id="previewUrl1"></span>
+                    </div>
+                    <div class="input-hint" id="hint1">输入完整的目标 URL（必须包含 http:// 或 https://）</div>
+                </div>
+
+                <!-- 模式二：伪装域名代理 -->
+                <div class="mode-block">
+                    <div class="mode-label">
+                        <span class="icon">🎯</span> 模式二：伪装域名代理
+                        <span class="tag tag-disguise">Disguise</span>
+                    </div>
+                    <div class="mode-desc">
+                        强制伪装 Referer 和 Origin 为指定域名，用于<strong style="color:var(--yellow)">绕过白名单防盗链</strong>（如 Pixiv、B站等）。
+                    </div>
+                    <div class="input-row">
+                        <span class="prefix">https://<span id="host2"></span>/</span>
+                        <input type="text" class="domain-input" id="domain2"
+                            placeholder="伪装域名，例如: www.pixiv.net"
+                            autocomplete="off" spellcheck="false">
+                        <span class="sep">/</span>
+                        <input type="text" class="url-input" id="url2"
+                            placeholder="目标 URL，例如: https://example.com/image.jpg"
+                            autocomplete="off" spellcheck="false">
+                        <button class="btn-inline btn-visit" id="visit2" disabled>🔗 访问</button>
+                        <button class="btn-inline btn-copy" id="copy2" disabled>📋 复制</button>
+                    </div>
+                    <div class="url-preview" id="preview2">
+                        <span class="label">代理地址：</span>
+                        <span class="full-url" id="previewUrl2"></span>
+                    </div>
+                    <div class="input-hint" id="hint2">输入伪装用的网站域名 + 完整的目标 URL</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══════════ 特性 ═══════════ -->
+        <div class="card">
+            <div class="card-header">
+                <span class="dot" style="background:var(--green)"></span>
+                网关特性 / Features
+            </div>
+            <div class="card-body">
+                <ul class="feature-list">
+                    <li><span class="check">✓</span><span>支持所有文件格式<br><small style="color:var(--text-secondary)">MP4 / MP3 / M3U8 / JPG / PNG / JS / CSS / HTML…</small></span></li>
+                    <li><span class="check">✓</span><span>流媒体断点续传<br><small style="color:var(--text-secondary)">HTTP 206 Range，切片即播秒缓冲</small></span></li>
+                    <li><span class="check">✓</span><span>客户端 UA 智能透传<br><small style="color:var(--text-secondary)">100% 真实浏览器标识，无特征泄漏</small></span></li>
+                    <li><span class="check">✓</span><span>全局跨域 CORS 开放<br><small style="color:var(--text-secondary)">Access-Control-Allow-Origin: *</small></span></li>
+                    <li><span class="check">✓</span><span>IP 链路高阶伪装<br><small style="color:var(--text-secondary)">多层 X-Forwarded-For 链路构造</small></span></li>
+                    <li><span class="check">✓</span><span>智能降级重试<br><small style="color:var(--text-secondary)">防盗链自动切换到伪装模式</small></span></li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- ═══════════ 调试响应头 ═══════════ -->
+        <div class="card">
+            <div class="card-header">
+                <span class="dot" style="background:var(--yellow)"></span>
+                调试响应头 / Debug Headers
+            </div>
+            <div class="card-body">
+                <ul class="tip-list">
+                    <li><code style="font-size:12px;color:var(--accent)">X-Debug-Fake-Referer</code> — 当前使用的 Referer 伪装策略</li>
+                    <li><code style="font-size:12px;color:var(--accent)">X-Debug-Upstream-IP</code> — 向上游传递的 IP 链路</li>
+                    <li><code style="font-size:12px;color:var(--accent)">X-Debug-Upstream-UA</code> — 向上游传递的 User-Agent</li>
+                    <li><code style="font-size:12px;color:var(--accent)">X-Debug-Proxy-Status</code> — 代理层最终响应状态码</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- ═══════════ 支持的方法 ═══════════ -->
+        <div class="card">
+            <div class="card-header">
+                <span class="dot" style="background:var(--cyan)"></span>
+                支持的方法 / Methods
+            </div>
+            <div class="card-body">
+                <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                    <span style="padding:4px 14px;background:var(--bg);border:1px solid var(--border);border-radius:4px;font-family:monospace;font-size:13px;color:var(--green)">GET</span>
+                    <span style="padding:4px 14px;background:var(--bg);border:1px solid var(--border);border-radius:4px;font-family:monospace;font-size:13px;color:var(--green)">HEAD</span>
+                    <span style="padding:4px 14px;background:var(--bg);border:1px solid var(--border);border-radius:4px;font-family:monospace;font-size:13px;color:var(--green)">OPTIONS</span>
+                    <span style="padding:4px 14px;background:var(--bg);border:1px solid var(--border);border-radius:4px;font-family:monospace;font-size:13px;color:var(--green)">POST</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">ESA Pages · 运行于阿里云边缘节点</div>
+    </div>
+
+    <script>
+        const host = window.location.host;
+
+        // 动态填入域名
+        ['host1', 'host2'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = host;
+        });
+
+        // ── 验证工具 ──
+        function isValidURL(str) {
+            if (!/^https?:\/\//i.test(str)) return false;
+            try { const u = new URL(str); return !!u.hostname && u.hostname.includes('.'); }
+            catch { return false; }
+        }
+        function isValidDomain(str) {
+            let domain = str.replace(/^https?:\/\//i, '').replace(/\/$/, '');
+            return /^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/.test(domain);
+        }
+        function setValidity(el, ok) { el.classList.remove('valid','invalid'); if (el.value.trim()) el.classList.add(ok?'valid':'invalid'); }
+        function clearValidity(el) { el.classList.remove('valid','invalid'); }
+
+        function updatePreview(previewBox, urlEl, visitBtn, copyBtn, proxyURL, ok) {
+            if (ok) {
+                urlEl.textContent = proxyURL;
+                previewBox.classList.add('show');
+                visitBtn.disabled = false;
+                copyBtn.disabled = false;
+            } else {
+                previewBox.classList.remove('show');
+                visitBtn.disabled = true;
+                copyBtn.disabled = true;
+            }
+        }
+
+        // ── 复制 ──
+        function copyURL(url, btn) {
+            navigator.clipboard.writeText(url).then(() => {
+                btn.textContent = '✓'; btn.classList.add('copied');
+                setTimeout(() => { btn.textContent = '📋'; btn.classList.remove('copied'); }, 1500);
+            }).catch(() => {
+                btn.textContent = '✗';
+                setTimeout(() => { btn.textContent = '📋'; }, 1500);
+            });
+        }
+
+        // ═══════════ 模式一 ═══════════
+        const url1    = document.getElementById('url1');
+        const hint1   = document.getElementById('hint1');
+        const prev1   = document.getElementById('preview1');
+        const prevUrl1 = document.getElementById('previewUrl1');
+        const visit1  = document.getElementById('visit1');
+        const copy1   = document.getElementById('copy1');
+
+        url1.addEventListener('input', () => {
+            const raw = url1.value.trim();
+            if (!raw) {
+                clearValidity(url1);
+                hint1.textContent = '输入完整的目标 URL（必须包含 http:// 或 https://）';
+                hint1.className = 'input-hint';
+                updatePreview(prev1, prevUrl1, visit1, copy1, '', false);
+                return;
+            }
+            if (isValidURL(raw)) {
+                setValidity(url1, true);
+                hint1.textContent = '✓ 格式正确';
+                hint1.className = 'input-hint success';
+                updatePreview(prev1, prevUrl1, visit1, copy1, 'https://'+host+'/'+raw, true);
+            } else {
+                setValidity(url1, false);
+                hint1.textContent = '⚠ URL 格式不正确，请确保包含完整协议（http:// 或 https://）且域名有效';
+                hint1.className = 'input-hint error';
+                updatePreview(prev1, prevUrl1, visit1, copy1, '', false);
+            }
+        });
+
+        visit1.addEventListener('click', () => { const u = prevUrl1.textContent; if (u) window.open(u, '_blank'); });
+        copy1.addEventListener('click', () => copyURL(prevUrl1.textContent, copy1));
+        url1.addEventListener('keydown', e => { if (e.key==='Enter' && !visit1.disabled) visit1.click(); });
+
+        // ═══════════ 模式二 ═══════════
+        const domain2 = document.getElementById('domain2');
+        const url2    = document.getElementById('url2');
+        const hint2   = document.getElementById('hint2');
+        const prev2   = document.getElementById('preview2');
+        const prevUrl2 = document.getElementById('previewUrl2');
+        const visit2  = document.getElementById('visit2');
+        const copy2   = document.getElementById('copy2');
+
+        function checkMode2() {
+            const d = domain2.value.trim();
+            const u = url2.value.trim();
+
+            if (!d && !u) {
+                clearValidity(domain2); clearValidity(url2);
+                hint2.textContent = '输入伪装用的网站域名 + 完整的目标 URL';
+                hint2.className = 'input-hint';
+                updatePreview(prev2, prevUrl2, visit2, copy2, '', false);
+                return;
+            }
+
+            const dOk = d ? isValidDomain(d) : true;
+            const uOk = u ? isValidURL(u) : true;
+            const bothFilled = d && u;
+            const allOk = bothFilled && dOk === true && uOk === true;
+
+            if (d) setValidity(domain2, dOk); else clearValidity(domain2);
+            if (u) setValidity(url2, uOk); else clearValidity(url2);
+
+            if (allOk) {
+                hint2.textContent = '✓ 格式正确';
+                hint2.className = 'input-hint success';
+                const domain = d.replace(/^https?:\/\//i,'').replace(/\/$/,'');
+                updatePreview(prev2, prevUrl2, visit2, copy2, 'https://'+host+'/'+domain+'/'+u, true);
+            } else {
+                const msgs = [];
+                if (d && !dOk) msgs.push('伪装域名格式不正确');
+                if (u && !uOk) msgs.push('目标 URL 格式不正确');
+                hint2.textContent = msgs.length ? '⚠ '+msgs.join('；') : '⚠ 格式不正确';
+                hint2.className = 'input-hint error';
+                updatePreview(prev2, prevUrl2, visit2, copy2, '', false);
+            }
+        }
+
+        domain2.addEventListener('input', checkMode2);
+        url2.addEventListener('input', checkMode2);
+
+        visit2.addEventListener('click', () => { const u = prevUrl2.textContent; if (u) window.open(u, '_blank'); });
+        copy2.addEventListener('click', () => copyURL(prevUrl2.textContent, copy2));
+        url2.addEventListener('keydown', e => { if (e.key==='Enter' && !visit2.disabled) visit2.click(); });
+        domain2.addEventListener('keydown', e => { if (e.key==='Enter' && !visit2.disabled) visit2.click(); });
+    </script>
+</body>
+</html>
