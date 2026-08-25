@@ -1,3 +1,10 @@
+// HTTP 头值必须是合法 ByteString（Latin1，U+0100 及以上的字符会抛 "not a valid ByteString"），
+// 同时禁止 CR/LF 以防头注入。复制/透传任何头之前先清洗一遍。
+function toValidHeaderValue(value) {
+  if (typeof value !== 'string') return value;
+  return value.replace(/[^\u0009\u0020-\u00FF]/g, '');
+}
+
 export default {
   async fetch(request) {
     const url = new URL(request.url);
@@ -135,7 +142,7 @@ export default {
       // UA 透传
       const clientUserAgent = request.headers.get('User-Agent');
       if (clientUserAgent && clientUserAgent.trim() !== '') {
-        headers.set('User-Agent', clientUserAgent);
+        headers.set('User-Agent', toValidHeaderValue(clientUserAgent));
         debug.ua = clientUserAgent;
       } else {
         const fallbackUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36';
@@ -146,7 +153,7 @@ export default {
       // 透传关键头
       for (const header of passHeaders) {
         const value = request.headers.get(header);
-        if (value) headers.set(header, value);
+        if (value) headers.set(header, toValidHeaderValue(value));
       }
 
       // IP 伪装头
@@ -272,12 +279,12 @@ export default {
         if (location) {
           const rewritten = buildProxyUrl(location, usedMode === 'disguise');
           const redirectHeaders = new Headers();
-          redirectHeaders.set('Location', rewritten);
+          redirectHeaders.set('Location', toValidHeaderValue(rewritten));
           redirectHeaders.set('Access-Control-Allow-Origin', '*');
           redirectHeaders.set('Access-Control-Expose-Headers', 'Location');
           return new Response(null, {
             status: response.status,
-            statusText: response.statusText,
+            statusText: toValidHeaderValue(response.statusText),
             headers: redirectHeaders,
           });
         }
@@ -296,7 +303,7 @@ export default {
 
       for (const header of headersToCopy) {
         const value = response.headers.get(header);
-        if (value) responseHeaders.set(header, value);
+        if (value) responseHeaders.set(header, toValidHeaderValue(value));
       }
 
       responseHeaders.set('Access-Control-Allow-Origin', '*');
@@ -305,16 +312,16 @@ export default {
       responseHeaders.delete('Set-Cookie');
 
       // 调试响应头（保留完整的调试信息）
-      responseHeaders.set('X-Debug-Fake-Referer', finalDebug.referer);
+      responseHeaders.set('X-Debug-Fake-Referer', toValidHeaderValue(finalDebug.referer));
       responseHeaders.set('X-Debug-Upstream-IP', upstreamIp);
-      responseHeaders.set('X-Debug-Upstream-UA', finalDebug.ua);
-      responseHeaders.set('X-Debug-Proxy-Status', `${usedMode} → Layer-1: ${response.status}`);
+      responseHeaders.set('X-Debug-Upstream-UA', toValidHeaderValue(finalDebug.ua));
+      responseHeaders.set('X-Debug-Proxy-Status', `${usedMode} -> Layer-1: ${response.status}`);
       responseHeaders.set('Access-Control-Expose-Headers',
         'X-Debug-Fake-Referer, X-Debug-Upstream-IP, X-Debug-Upstream-UA, X-Debug-Proxy-Status, Content-Range, Content-Disposition');
 
       return new Response(response.body, {
         status: response.status,
-        statusText: response.statusText,
+        statusText: toValidHeaderValue(response.statusText),
         headers: responseHeaders
       });
 
