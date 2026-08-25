@@ -2,7 +2,7 @@
   "name": "cors-reverse-proxy",
   "entry": "./src/proxy.js",
   "installCommand": "",
-  "buildCommand": "",
+  "buildCommand": "echo 'static edge-function project: no build required'",
   "assets": {
     "directory": "./public"
   }

@@ -1,0 +1,9 @@
+{
+  "name": "cors-reverse-proxy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CORS reverse proxy running on Alibaba Cloud ESA Pages (edge function + static assets)",
+  "scripts": {
+    "build": "echo \"Static edge-function project: no build step required\""
+  }
+}
