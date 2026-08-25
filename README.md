@@ -2,8 +2,6 @@
 
 一个部署在**阿里云 ESA Pages** 边缘节点上的通用 CORS 反向代理网关。可将任意外部资源（图片、视频、文件等）通过你的域名转发，自动解决跨域（`Access-Control-Allow-Origin: *`）与防盗链（自动伪装 Referer/Origin）问题。
 
-> 本项目由腾讯云 EdgeOne Pages 迁移而来，核心代理逻辑完全保留，仅适配了 ESA 的边缘函数运行时 API。
-
 ## 功能特性
 
 - **CORS 全开放**：对浏览器暴露 `Access-Control-Allow-Origin: *`，支持任意来源跨域读取。
@@ -21,15 +19,11 @@
 ├── package.json           # 占位配置，build 为无操作（仅用于让 ESA 构建通过）
 ├── src/
 │   └── proxy.js           # 核心边缘函数（catch-all 反向代理）
-├── public/
-│   ├── index.html         # 前端测试页（含代理用法示例）
-│   ├── favicon.ico
-│   └── favicon.svg
-├── edgeone.config.json.bak   # 迁移前 EdgeOne 配置（留作回退，不参与部署）
-└── functions.edgeone.bak/     # 迁移前 EdgeOne 函数（留作回退，不参与部署）
+└── public/
+    ├── index.html         # 前端测试页（含代理用法示例）
+    ├── favicon.ico
+    └── favicon.svg
 ```
-
-> `.bak` 后缀的文件不会被 ESA 加载，仅用于从历史版本回退参考。
 
 ## 使用方式
 
@@ -86,10 +80,9 @@ https://你的域名/https://目标URL
 - ESA 单次执行最多 4 个 fetch 子请求；本代理最多 2 次（Clean + 防盗链重试），安全。
 - 网关对首字节有超时限制（约 10s），慢速视频源建议依赖流式传输（本代码已是流式转发）。
 
-## 本地开发 / 回退
+## 本地开发
 
 - 本地无特殊运行环境要求，核心是标准 Web API（`fetch` / `Request` / `Response` / `Headers`）。
-- 如需回退到 EdgeOne 版本，参考 `edgeone.config.json.bak` 与 `functions.edgeone.bak/` 中的原实现。
 
 ## License
 
