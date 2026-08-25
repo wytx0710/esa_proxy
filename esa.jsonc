@@ -1,0 +1,9 @@
+{
+  "name": "cors-reverse-proxy",
+  "entry": "./src/proxy.js",
+  "installCommand": "",
+  "buildCommand": "",
+  "assets": {
+    "directory": "./public"
+  }
+}
